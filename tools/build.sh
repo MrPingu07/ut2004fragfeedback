@@ -24,7 +24,8 @@ PKG="FragFeedback"
 echo "==> game   : $UTDIR"
 echo "==> source : $ROOT/source/$PKG/Classes"
 
-# --- 1) sync classes --------------------------------------------------------
+# --- 1) sync classes (wipe first: stale renamed classes must not linger) -----
+rm -rf "$UTDIR/$PKG/Classes"
 mkdir -p "$UTDIR/$PKG/Classes"
 cp -f "$ROOT/source/$PKG/Classes/"*.uc "$UTDIR/$PKG/Classes/"
 
@@ -74,6 +75,10 @@ print(f"EditPackages ok ({dropped} duplicate lines dropped)")
 PY
 
 # --- 3) compile --------------------------------------------------------------
+# ucc make in this engine build can consider the package "up to date" even
+# after the classes change (seen when renaming a class), so always rebuild
+# the single package from scratch.
+rm -f "$UTDIR/System/$PKG.u"
 cd "$UTDIR/System"
 wine UCC.exe make 2>&1 | grep -Ev "fixme:|wineboot|winediag" || true
 test -f FragFeedback.u || { echo "ERROR: FragFeedback.u was not produced"; exit 1; }

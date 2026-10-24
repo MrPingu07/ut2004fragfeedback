@@ -4,6 +4,14 @@ Environment, toolchain and engine observations gathered while building the
 mutator. Everything below was verified directly against the local game copy
 in `/home/jdmr/Juegos/UT2004/` (not from memory or third-party lore).
 
+> Rework note (v0.1 → v0.2): the first build rendered a letterbox + big
+> WASTED-style banner, because "GTA V-like" was read as the death-frame
+> gesture. The user clarified it means the **blue kill flash**; the class
+> was renamed `FragFeedbackBanner` → `FragFeedbackFlash` and its code
+> reduced to a single full-screen additive quad. The research that only
+> concerned fonts/letterbox is kept below (it is still useful for any
+> future text overlay), clearly marked as such.
+
 ## The game copy
 
 - `/home/jdmr/Juegos/UT2004/` is the **Windows edition** of UT2004
@@ -101,27 +109,35 @@ appends `EditPackages=FragFeedback` exactly once, right after the last
 - `Engine.LocalMessage` (`ClientReceive`) could spawn client visuals too,
   but carries no per-player configuration channels (only int Switch + PRI
   objects); rejected for our "arbitrary color + duration" requirement.
-- **Decision: replicated `HudOverlay`** class `FragFeedbackBanner`
+- **Decision: replicated `HudOverlay`** class (renamed from the prototype's
+  `FragFeedbackBanner` to `FragFeedbackFlash`)
   (`RemoteRole=ROLE_SimulatedProxy`, `bOnlyRelevantToOwner=True`,
   `Owner` = the player's PlayerController), spawned by the server mutator in
   `ModifyPlayer`, pushed one-shot per kill through a reliable
-  server→client remote call (`ClientShowBanner`).
+  server→client remote call (`ClientShowFlash`).
 
 ## Canvas primitives used (from the exported `Engine.Canvas`)
 
 - `FontScaleX/FontScaleY` are the UT2004 ("gam") additions that scale
-  `DrawText` — GTA-style big text. **Measurement caveat**: metrics
-  (`TextSize`) were measured with scale forced to 1.0; all scaling math is
-  done script-side and applied (`W*S`, `H*S`), so both possible native
-  interpretations of `TextSize` under a non-1 scale give identical results.
-- `DrawTile(Texture'Engine.WhiteTexture', ...)` for solid rectangles
-  (letterbox bars); `Engine.WhiteTexture` is present in `Engine.u`.
-- `C.Style = ERenderStyle.STY_Alpha` enables per-color alpha (the letterbox
-  fade envelope is implemented with alpha only, no screen fade hacks).
-- Text outline/shadow is layered `C.DrawText` (8-way outline + a longer
-  down-right drop shadow), matching the GTA V "WASTED" poster look.
+  `DrawText` — (banner-era note: used for the big text; the current flash
+  makes no fonts calls at all, and the canvas is fully save/restored
+  around each draw).
+- `DrawTile(Texture'Engine.WhiteTexture', ...)` for the flash quad; the
+  full effect is one quad drawn with `C.Style =
+  ERenderStyle.STY_Additive` and the fade envelope carried by the
+  DrawColor alpha byte — stock engine texture and stock blend path, no
+  custom materials needed.
+- Shared-canvas courtesy learned from HUD internals: HUD draws *before*
+  overlays and continues with weapon/info rendering right after the
+  overlay loop, so `Render(Canvas)` must restore every canvas property it
+  touches (Font, FontScaleX/Y, Style, DrawColor, Z, OrgX/Y, ClipX/Y,
+  CurX/Y, CurYL, ColorModulate, bCenter, bNoSmooth, bRenderLevel) — done
+  in `FragFeedbackFlash.Render`.
 
-## Fonts available in this installation
+## Fonts available in this installation (banner-era research, kept for the record)
+
+*(Only relevant to the retired v0.1 banner or any future text overlay; the
+flash draws no text.)*
 
 - There are **no standalone `UT2003Fonts.u` / `2K4Fonts.u` package files**,
   yet vanilla code (`Engine.int` HUD font names, `UT2LargeFont`,
@@ -136,14 +152,14 @@ appends `EditPackages=FragFeedback` exactly once, right after the last
   - `UT2003Fonts.FontEurostile37` — fallback in code
   - `2K4Fonts.Verdana14` — default subtitle font (Engine.Canvas.default.Font
     as last resort)
-- Font selection is a *client-side ini* choice (`BannerFontName`,
-  `VictimFontName`) since the font must resolve on the rendering machine.
+- Font selection in v0.1 was a *client-side ini* choice (`BannerFontName`,
+  `VictimFontName`); the flash needs no fonts at all.
 
 ## Networking notes
 
-- The banner proxy replicates its configuration bundle under
+- The flash proxy replicates its configuration bundle under
   `reliable if (bNetInitial && Role == ROLE_Authority)` and the per-kill
-  trigger under `reliable if (Role == ROLE_Authority) ClientShowBanner`
+  trigger under `reliable if (Role == ROLE_Authority) ClientShowFlash`
   (standard UT2004 remote-call shape; the engine executes these locally on
   listen/standalone hosts and forwards them to owners on network clients).
 - `Mutator.bAddToServerPackages=True` auto-adds the package to the server
@@ -170,7 +186,7 @@ appends `EditPackages=FragFeedback` exactly once, right after the last
 
 - The in-game **[Configure Mutators] page look & feel** (the PlayInfo flow
   is identical to the user's own working RespawnDelay, so risk is low).
-- The visual itself on screen (banner pop, letterbox slide); smoke tests
+- The visual itself on screen (flash pop/decay); smoke tests
   exercised the server path (spawn + registration + config propagation) and
   `tools/test.sh` starts the game in DM with the mutator for eyeballing.
 

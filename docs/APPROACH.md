@@ -2,27 +2,30 @@
 
 ## Goal
 
- представляют"GTA V-like frag feedback on screen for UT2004", where **version
- zero is already built around customization**: the two headline knobs
- requested for the GUI are
+"GTA V-like frag feedback on screen" as **defined by the user** (this is
+the redefinition that shaped v0.2): the GTA V postprocess kill feedback —
+**the screen flashes with a colored (blue by default) full-screen effect
+that quickly appears and slowly vanishes**. Version zero keeps the two
+headline knobs requested for the GUI:
 
-- **Color** — the banner text color (freely as R/G/B 0..1 channels)
-- **Duration** — how long the whole feedback stays on screen
+- **Color** — the flash color, freely as R/G/B 0..1 channels (default: the
+  GTA-ish blue 0.15 / 0.45 / 1.00)
+- **Duration** — seconds from onset to fully gone (default: 1.5)
 
 Both are exposed through the stock **[Configure Mutators]** page (PlayInfo),
-exactly like the engine's own mutator settings are. Everything else (banner
-text, subtitle text, fonts, letterbox on/off) is deliberately handled as
-file-level settings in v0 and is already shaped as the same `var() config`
-pattern so promoting any of them into the GUI later is a four-line change
-(`static FillPlayInfo` + localization keys).
+exactly like the engine's own mutator settings are. Peak intensity is a
+file-level `FlashIntensity` var (one `AddSetting` line away from the GUI if
+wanted). The first prototype (letterbox bars + WASTED-style banner text)
+was retired — the user clarified the target gesture was the *flash*; the
+renaming of its class to `FragFeedbackFlash` mirrors that.
 
 ## Architecture (three classes)
 
 ```
 FragFeedback package
-├── FragFeedbackMutator  (server)  entry point + GUI config + banner proxies
+├── FragFeedbackMutator  (server)  entry point + GUI config + flash proxies
 ├── FragFeedbackRules    (server)  GameInfo.ScoreKill hook (GameRules chain)
-└── FragFeedbackBanner   (server+client, replicated)  the on-screen visual
+└── FragFeedbackFlash    (server+client, replicated)  the on-screen flash
 ```
 
 ### Why a GameRules instead of the mutator's own ScoreKill
@@ -35,98 +38,97 @@ spawns one `FragFeedbackRules` in `PostBeginPlay` and registers it with
 `Level.Game.AddGameModifier(...)`. Chain integrity with other mutators
 (RespawnDelay, GTAThirdPerson, vanilla) is preserved by construction.
 
-### Why a replicated HudOverlay proxy (not LocalMessage, not Interaction)
+### Why a replicated HudOverlay proxy (kept from the prototype, still ideal)
 
 The kill happens on the **server**, the screen lives on the **client**:
 
 1. `ModifyPlayer(Pawn)` — called for every (re)spawn — makes the mutator
-   `Spawn(class'FragFeedbackBanner', PC)` with `Owner = the player's
+   `Spawn(class'FragFeedbackFlash', PC)` with `Owner = the player's
    PlayerController`. One proxy per human; bots get none.
    `bOnlyRelevantToOwner=True` keeps it private to that player.
 2. The mutator pushes the server-side configuration (Color channels,
-   Duration, texts) into the proxy's vars; they replicate with the initial
-   actor message (`reliable if (bNetInitial && Role == ROLE_Authority)`).
-   This is what makes the **GUI settings reachable on network clients**
-   with zero extra plumbing.
-3. Per frag, `FragFeedbackRules.ScoreKill` → `Mutator.NotifyFrag`:
+   Duration, Intensity) into the proxy's vars; they replicate with the
+   initial actor message (`reliable if (bNetInitial &&
+   Role == ROLE_Authority)`). This is what makes the **GUI settings
+   reachable on network clients** with zero extra plumbing.
+3. Per frag, `FragFeedbackRules.ScoreKill` → `Mutator.NotifyFrag`, which
      - skips suicides, team kills (team games), bots;
-   - calls the reliable remote `ClientShowBanner(victimName)` on the
-     killer's proxy.
+   - calls the reliable remote `ClientShowFlash()` on the killer's proxy.
 4. On the client, the proxy attaches itself to `PlayerController.MyHUD`
    via `HUD.AddHudOverlay` (`PostBeginPlay` for standalone/listen host,
    `PostNetBeginPlay` for network clients, bounded `Timer` retries in
    between), and `Render(Canvas)` runs while
-   `0 <= (TimeSeconds - ShowAt) < BannerDuration`.
+   `0 <= (TimeSeconds - SpawnAt) < FlashDuration`.
 
-Rejection rationale:
-- *LocalMessage* — fixed draw color/lifetime comes from message-class
-  defaults; arbitrary per-user color+duration would need encoding hacks.
-- *Interaction* — works, but needs client-side self-registration and pulls
-  in input handling; HudOverlay is the narrower engine-blessed HUD hook.
-- *Plain user-message spam* — no control over size, position, animation.
+Alternatives that were rejected (still relevant for future work):
+- *`PlayerController.ClientFlash()`* — the engine's own damage flash is a
+  one-liner from the mutator path, but its duration/color are fixed by the
+  engine's native implementation, killing the Duration/Color requirement.
+- *LocalMessage* — the draw color/lifetime is nailed in message-class
+  defaults, no per-player config channel.
+- *Interaction* — works for HUD drawing but heavier (input handling,
+  client-side registration than a HudOverlay proxy).
 
-## The visual (GTA V "WASTED" treatment, applied to a frag)
+## The visual: quick-in / slow-out screen flash
 
-For the configured Duration window (default 3 s), the banner is composed
-purely of canvas primitives:
+While the Duration window is open, `Render(Canvas)` draws **one
+full-screen quad** (`Engine.WhiteTexture` 1×1) with
+`C.Style = ERenderStyle.STY_Additive` in the configured color:
 
-1. **Letterbox bars** — black top/bottom bars at 10.5 % of screen height,
-   sliding in like the GTA V wasted screen and sliding back out at the end
-   of the window (fade envelope: alpha 0→1 in 12 % of the duration, 1→0
-   over the last 30 %).
-2. **Banner text** (default `"WASTED"`, `2K4Fonts.Impact32`) — glyph height
-   ≈ 13 % of screen height, horizontally centered, slight lift above
-   center; **scale pop-in** (1.5× → 1.0× ease-out over 0.3 s) plus a heavy
-   GTA-style treatment: 8-direction black outline (2-6 px, scaled with the
-   glyph height) + long down-right drop shadow + the configured color fill.
-3. **Subtitle** (default format `"You fragged %1"`, `2K4Fonts.Verdana14`)
-   — small near-white line under the banner with the fragged player's name;
-   an empty format disables it.
+- **Attack (quick appear):** alpha ramps 0→1 linearly over
+  `FClamp(0.10 * Duration, 0.08, 0.8 * Duration)` seconds — GTA flashes
+  land fast, but never instantly snap.
+- **Decay (slow vanish):** linear alpha = `1 - (t-attack)/(dur-attack)`,
+  reaching zero exactly at `Duration`. Linear on purpose: predictable and
+  the "slowly vanishes" feel the user described; a power/`exp` curve would
+  be a one-line change if it ever feels too flat.
+- **Peak intensity:** alpha is multiplied by `FlashIntensity` (0..1), so
+  the whole effect is one variable's brightness knob.
+- The canvas is fully save/restored around the draw (shared HUD canvas:
+  Font/FontScale/Style/DrawColor/Z/Org/Clip/Cur/ColorModulate/bCenter/
+  bNoSmooth/bRenderLevel) so no stock overlay inherits our state.
 
-Timing/threshold constants are named `const`s in one block at the top of
-`FragFeedbackBanner.uc` (HeightFrac, gaps, fade fractions, pop time).
+Timing constants sit in a named `const` block at the top of
+`FragFeedbackFlash.uc` (`FlashInFrac`, `MinAttackTime`).
 
-## Customization surface (v0)
+## Customization surface (v0.2)
 
 | Setting | Where | Class var |
 |---|---|---|
 | Duration (0.5-15 s) | [Configure Mutators] | `DurationSec` |
 | Color R/G/B (0-1) | [Configure Mutators] | `ColorR`, `ColorG`, `ColorB` |
-| Banner text | UT2004.ini | `BannerText` |
-| Subtitle / victim line | UT2004.ini | `VictimFormat` (`%1` = victim name) |
-| Letterbox bars on/off | UT2004.ini | `ShowBars` |
-| Banner / subtitle fonts | UT2004.ini | `BannerFontName`, `VictimFontName` |
+| Peak intensity | UT2004.ini | `FlashIntensity` |
 
-Inis section: `[FragFeedback.FragFeedbackMutator]` in `UT2004.ini`
+Ini section: `[FragFeedback.FragFeedbackMutator]` in `UT2004.ini`
 (PlayInfo saves there natively, mirroring `RespawnDelay.RespawnDelay`).
 
 Design rule observed throughout: **every tweakable is a `var() config`**
 with engine-friendly extras strings (`"8;0.5:15.0"`), so any file-level
 setting can graduate into the GUI in one `AddSetting` line.
 
-## Console helpers (own testing)
+## Console helper (v0 testing)
 
-- `mutate fragfeedbacktest` — show the banner immediately (no kill needed)
-- `mutate fragfeedbackstatus` — print duration + RGB channels (0-255)
+- `mutate fragfeedbacktest` — flash the screen immediately (no kill needed)
 
-## Scope cuts in v0 (documented, cheap to add later)
+## Scope cuts in v0.2 (documented, cheap to add later)
 
-- No own-death banner ("WASTED for you") — the same proxy is already
-  replicated per-player; a `ClientShowBanner`-style self-call on death is a
-  two-line addition in `FragFeedbackRules` (`Killed` instead of `Killer`).
-- No multiplayer-visible broadcast (feedback stays private to the killer,
-  which is what "frag feedback" means).
-- No color presets dropdown (the R/G/B edits are the general case; a
+- No own-death flash (clientblue V kills show the flash for you too); the
+  replicated proxy is already per-player, a `Killed` branch in
+  `NotifyFrag` is the whole change.
+- No color presets dropdown (R/G/B edits are the general case; a
   `"Select"` preset row could be added like RespawnDelay's presets).
-- No grayscale/desaturation pass (UT2004's pipeline makes it hacky; the
-  letterbox+banner is the recognizable GTA gesture).
+- No flash-granularity extras (screen-fade division, vignette, shake):
+  the effect is deliberately one quad, per the clarified goal.
 
 ## Build/deploy pipeline
 
 `tools/build.sh` (idempotent):
-syncs `source/FragFeedback/Classes/*.uc` → `$UT2004_DIR/FragFeedback/Classes`,
+syncs `source/FragFeedback/Classes/*.uc` → `$UT2004_DIR/FragFeedback/Classes`
+(wiping the target dir first so renamed/removed classes cannot linger),
 fixes up `EditPackages` (adds `FragFeedback` once, collapses the duplicated
-`GTAThirdPerson` lines found in this install), runs `wine UCC.exe make`,
+`GTAThirdPerson` lines found in this install), **deletes** the stale
+compiled `System/FragFeedback.u` (this engine's `ucc make` can consider a
+package up to date after class changes), runs `wine UCC.exe make`,
 `wine UCC.exe exportcache FragFeedback.u`, and installs
 `install/FragFeedback.int` into `System/`.
 
@@ -135,12 +137,14 @@ fixes up `EditPackages` (adds `FragFeedback` once, collapses the duplicated
 
 ## Verification performed
 
-- `ucc make` builds clean (0 errors / 0 warnings on the first pass).
-- `ucc exportcache` generated the mutator `.ucl` entry; the `.int` mirrors
-  the `Object=` convention used by the install's existing working mutators.
-- Headless `ucc server DM-Corrugation?...?mutator=FragFeedback.FragFeedbackMutator`
-  with `MinPlayers=8`: mutator and rules register, no runtime errors over a
-  full match (see docs/FINDINGS.md for the pre-existing GameSpy noise).
-- Human screen test: pending, via `tools/test.sh` (banner pop, letterbox
-  slide, color/duration change from the mutator screen),
-  `mutate fragfeedbacktest` for a no-kill preview.
+- `ucc make` builds clean (0 errors / 0 warnings; force-rebuild verified
+  after the class rename, see the `.u` string dump containing only
+  `FragFeedbackFlash`).
+- `ucc exportcache` regenerated the mutator `.ucl`.
+- Headless `ucc server DM-Corrugation?...?mutator=FragFeedback.FragFeedbackMutator?MinPlayers=8`:
+  mutator + rules register with the new defaults
+  (`duration=1.50 s, color = 0.15,0.45,1.00 intensity = 0.80`), no runtime
+  errors over boot and match start.
+- Human screen test (flash pop/decay + GUI knobs): pending, via
+  `tools/test.sh` or normal play; `mutate fragfeedbacktest` for a
+  no-kill preview.

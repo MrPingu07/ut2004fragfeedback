@@ -1,15 +1,19 @@
 # FragFeedback — GTA V-style frag feedback for Unreal Tournament 2004
 
-A UT2004 mutator that reacts to every frag **you** score with a GTA V
-"WASTED"-style screen treatment: cinematic letterbox bars slide in, and a
-big bold banner pops with your chosen text and the fragged player's name.
+A UT2004 mutator that reacts to every frag **you** score with the GTA V
+postprocess kill feedback: your **whole screen flashes** in a color (blue
+by default) that **quickly appears and slowly vanishes**. No letters, no
+bars — just the colored screen flash, exactly the gesture GTA V teaches.
 
 **Version zero is built to be customized from the game's own GUI:** the
-banner **Color** (R/G/B channels, 0–1) and **Duration** (seconds) are
+flash **Color** (R/G/B channels, 0–1) and **Duration** (seconds) are
 exposed to the stock **[Configure Mutators]** page — no file editing
-required. Everything else (banner text, victim line, fonts, letterbox) is
-already a config var too, so those can be tuned in `UT2004.ini` or promoted
-to the GUI with one line each.
+required. Peak intensity is also a config var (`FlashIntensity`) for ini
+tweaks and is one line away from the GUI.
+
+> History: the first prototype (letterbox + WASTED banner) was replaced in
+> v0.2 after a review round where the goal was clarified: "GTA V-like"
+> meant the blue screen-flash postprocess effect, not the death banner.
 
 ---
 
@@ -17,47 +21,45 @@ to the GUI with one line each.
 
 | Element | Default |
 |---|---|
-| Letterbox bars (top/bottom, slide-in/out) | black, ~10 % of screen height |
-| Banner text | `WASTED` in bold condensed Impact-style font |
-| Banner color | GTA V red (R 0.72 / G 0.10 / B 0.12) |
-| Banner treatment | 8-way black outline + drop shadow + scale pop-in |
-| Subtitle | `You fragged <victim name>` |
-| Lifetime | 3 seconds (fade-in 12 %, hold, fade-out last 30 %) |
+| Effect | full-screen additive quad in the configured color |
+| Onset | quick ramp-up (~10 % of the duration, >= 0.08 s) |
+| Decay | slow linear fade to zero at the configured duration |
+| Color | GTA-ish blue: R 0.15 / G 0.45 / B 1.00 |
+| Duration | 1.5 seconds, fully configurable from the GUI |
+| Peak intensity | 0.8 (file level: `FlashIntensity`) |
 
-Team kills and suicides stay silent (feedback is for earned frags).
-The feedback is private to the killer's screen — other players see nothing.
+Team kills and suicides stay silent. The feedback is private to the
+killer's screen — other players see nothing.
 
 ## The mutator in action
 
 1. Go to **Instant Action** (or a server setup screen), pick **Mutators**,
    select **GTA V Frag Feedback** and press **[Configure Mutators]**.
 2. Set **Duration (seconds)** and **Color R/G/B (0–1)**.
-   - Red GTA banner: 0.72 / 0.10 / 0.12
-   - Gold: 1.0 / 0.8 / 0.0 —
+   - GTA-ish blue (default): 0.15 / 0.45 / 1.00
+   - Red: 0.9 / 0.05 / 0.05 —
+   - Green: 0.1 / 0.9 / 0.1 —
    - White: 1.0 / 1.0 / 1.0
-3. Play. On every frag: bars slide, banner pops, victim's name appears.
+3. Play. Frag → flash pops in, then drains away over Duration.
 
-Console helpers (Instant Action / listen server):
+Console helper (Instant Action / listen server):
 
 ```
-mutate fragfeedbacktest     # show the banner without fragging anyone
-mutate fragfeedbackstatus   # print the current duration and color
+mutate fragfeedbacktest      # show the flash without fragging anyone
 ```
 
 ## File-level settings (optional, `UT2004.ini`)
 
 ```ini
 [FragFeedback.FragFeedbackMutator]
-BannerText="WASTED"                  ; whatever text you want
-VictimFormat="You fragged %1"        ; empty string disables the line
-ShowBars=True                        ; letterbox bars on/off
-BannerFontName="2K4Fonts.Impact32"   ; resolved on the client machine
-VictimFontName="2K4Fonts.Verdana14"
+DurationSec=1.500000
+ColorR=0.150000
+ColorG=0.450000
+ColorB=1.000000
+FlashIntensity=0.800000      ; peak brightness (0-1), dim to taste
 ```
 
-The GUI variables are stored in the same section
-(`DurationSec`, `ColorR`, `ColorG`, `ColorB`) — same file, same style as
-your other mutators (see `[RespawnDelay.RespawnDelay]`, section style also used by GTAThirdPerson).
+Same section the GUI writes to; same style as your other mutators.
 
 ## Install (already done on this machine)
 
@@ -86,16 +88,15 @@ cd /home/jdmr/Juegos/UT2004/System
 wine UT2004.exe "DM-Corrugation?game=DeathMatch?mutator=FragFeedback.FragFeedbackMutator"
 ```
 
-## Multilingual / network notes
+## Network notes
 
-- The `.int` is English; strings are also baked into class defaults, so the
-  mutator never breaks without it. Extra language files can be added later
-  (`.det`, `.est`, …) copying the int's structure.
-- For network play, `bAddToServerPackages=True` auto-registers the package;
-  remote clients still need the `.u` (via redirect server or by copying
-  `System/FragFeedback.u` manually).
+- `bAddToServerPackages=True` auto-registers the package; remote clients
+  joining an internet/LAN server will additionally need the `.u` (via
+  redirect server or by copying `System/FragFeedback.u` manually).
 - Settings changed in the GUI take effect at the next map load (each match
   re-spawns the mutator and the proxies; standard PlayInfo behavior).
+- Proxy configuration (color/duration/intensity) is replicated; the effect
+  itself renders client-side from replicated values.
 
 ## Project layout
 
@@ -103,7 +104,7 @@ wine UT2004.exe "DM-Corrugation?game=DeathMatch?mutator=FragFeedback.FragFeedbac
 source/FragFeedback/Classes/
     FragFeedbackMutator.uc   server-side mutator: GUI config, kill routing
     FragFeedbackRules.uc     GameRules hook (ScoreKill chain, other-mutator-safe)
-    FragFeedbackBanner.uc    replicated HudOverlay: letterbox + banner + subtitle
+    FragFeedbackFlash.uc     replicated HudOverlay: the flash itself
 install/FragFeedback.int
 tools/build.sh
 tools/test.sh
@@ -113,22 +114,23 @@ docs/APPROACH.md             architecture + design decisions + scope cuts
 
 ## Roadmap (after v0)
 
-- Own-death banner (the GTA classic "WASTED" when YOU die).
+- Own-death flash (the GTA V "you died" blue treatment when YOU die).
 - GUI presets dropdown for colors (engine supports `Select` render type).
-- Kill-streak escalation (double-kill variants) using the same proxy.
-- Fully per-player local overrides (`[FragFeedback.*]` client config).
+- Intensity promoted to the GUI (one `AddSetting` line).
+- Per-weapon tints, kill-streak escalation intensities.
 
 ## Development notes / troubleshooting
 
 - The game copy is the **Windows edition running through Wine**
   (`wine UCC.exe`, `wine UT2004.exe`); see `docs/FINDINGS.md`.
-- `Bus` noise: wine prints `fixme:winediag` lines; the build filters them.
+- `ucc make` in this engine build can consider a rebuilt package "up to
+  date" even after class changes (a class rename did it); the build script
+  deletes the old `.u` first to force a clean recompile.
 - If the mutator list doesn't show the mutator, check that
   `System/FragFeedback.ucl` and the `[Public] Object=` line in
   `System/FragFeedback.int` are present (build script handles both).
+- The flash uses `Engine.WhiteTexture` + `STY_Additive`, both stock engine
+  assets/paths — no custom textures needed.
 - Server `ucc server` crash (`UdpGamespyQuery ... Assertion failed, line
   58`) is a **pre-existing install issue** (Epic's port-swap watchdog +
   dead GameSpy masters); workaround and details in docs/FINDINGS.md.
-- The banner uses fonts that only exist inside the stock GUI packages;
-  fallbacks are hard-coded (`UT2003Fonts.FontEurostile37`, then the engine
-  default font), and the font names are per-machine ini settings.

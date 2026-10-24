@@ -1,21 +1,20 @@
 [Public]
-Object=(Name=FragFeedback.FragFeedbackMutator,Class=Class,MetaClass=Engine.Mutator,Description="GTA V Frag Feedback,Kill feedback in GTA V style: when you frag someone, letterbox bars slide in and a big banner with the victim's name pops on screen. Color and duration are configurable from the Mutators screen.")
+Object=(Name=FragFeedback.FragFeedbackMutator,Class=Class,MetaClass=Engine.Mutator,Description="GTA V Frag Feedback,Kill feedback in GTA V style: when you frag someone, your screen flashes in your color (blue by default) - it quickly appears and slowly vanishes. Color and duration are configurable from the Mutators screen.")
 
 [FragFeedback.FragFeedbackMutator]
 FriendlyName="GTA V Frag Feedback"
-Description="Kill feedback in GTA V style: a letterbox plus a bold banner (WASTED-style) with the victim's name appears after each of your frags. Team kills stay silent. Color (RGB channels) and duration are configurable from the mutators screen [Configure Mutators button]."
+Description="Kill feedback in GTA V style: whenever you frag someone, your screen flashes with a full-screen colored postprocess effect (blue by default) that quickly appears and slowly vanishes. Team kills stay silent. Color (RGB channels) and duration are configurable from the mutators screen [Configure Mutators button]."
 
 ; -- mutator GUI ([Configure Mutators] / PlayInfo) -----------------------------------
-BannerGroup="Frag Feedback"
+FlashGroup="Frag Feedback"
 DurationDisplayText="Duration (seconds)"
-DurationDescText="Total seconds the GTA-style banner and its letterbox bars stay on screen after each of your frags."
+DurationDescText="Total seconds the colored screen flash takes from its quick onset to fully gone, after each of your frags."
 ColorRDisplayText="Color R (0-1)"
-ColorRDescText="Red channel of the banner text. GTA V WASTED look defaults to 0.72 / 0.10 / 0.12; a gold banner would be R 1.0."
+ColorRDescText="Red channel of the flash. GTA-ish blue default is 0.15 / 0.45 / 1.00; a red flash would be 0.9 / 0.05 / 0.05."
 ColorGDisplayText="Color G (0-1)"
-ColorGDescText="Green channel of the banner text."
+ColorGDescText="Green channel of the flash."
 ColorBDisplayText="Color B (0-1)"
-ColorBDescText="Blue channel of the banner text."
+ColorBDescText="Blue channel of the flash."
 
 ; -- console feedback ----------------------------------------------------------------
-MsgStatus="FragFeedback: duration %1 s, color channels (0-255) %2"
-MsgTestShown="FragFeedback: fake banner displayed."
+MsgTestShown="FragFeedback: fake flash displayed."
