@@ -1,0 +1,14 @@
+# build/run artifacts that never belong in version control
+*.kdev*
+*~
+*.swp
+
+# locally-exported engine sources (docs/FINDINGS.md explains the command)
+/export*/
+
+# binary packages built straight into the game copy
+*.u
+*.ucl
+
+# keep the shipped int canonical but ignore local copies
+FragFeedback/

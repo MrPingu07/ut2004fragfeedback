@@ -1,0 +1,21 @@
+[Public]
+Object=(Name=FragFeedback.FragFeedbackMutator,Class=Class,MetaClass=Engine.Mutator,Description="GTA V Frag Feedback,Kill feedback in GTA V style: when you frag someone, letterbox bars slide in and a big banner with the victim's name pops on screen. Color and duration are configurable from the Mutators screen.")
+
+[FragFeedback.FragFeedbackMutator]
+FriendlyName="GTA V Frag Feedback"
+Description="Kill feedback in GTA V style: a letterbox plus a bold banner (WASTED-style) with the victim's name appears after each of your frags. Team kills stay silent. Color (RGB channels) and duration are configurable from the mutators screen [Configure Mutators button]."
+
+; -- mutator GUI ([Configure Mutators] / PlayInfo) -----------------------------------
+BannerGroup="Frag Feedback"
+DurationDisplayText="Duration (seconds)"
+DurationDescText="Total seconds the GTA-style banner and its letterbox bars stay on screen after each of your frags."
+ColorRDisplayText="Color R (0-1)"
+ColorRDescText="Red channel of the banner text. GTA V WASTED look defaults to 0.72 / 0.10 / 0.12; a gold banner would be R 1.0."
+ColorGDisplayText="Color G (0-1)"
+ColorGDescText="Green channel of the banner text."
+ColorBDisplayText="Color B (0-1)"
+ColorBDescText="Blue channel of the banner text."
+
+; -- console feedback ----------------------------------------------------------------
+MsgStatus="FragFeedback: duration %1 s, color channels (0-255) %2"
+MsgTestShown="FragFeedback: fake banner displayed."
