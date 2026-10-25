@@ -6,9 +6,8 @@
 # locally-exported engine sources (docs/FINDINGS.md explains the command)
 /export*/
 
-# binary packages built straight into the game copy
+# binary packages built straight into the game copy (never the repo)
 *.u
 *.ucl
 
-# keep the shipped int canonical but ignore local copies
-FragFeedback/
+# built/install output lives in $UT2004_DIR/System, not here
