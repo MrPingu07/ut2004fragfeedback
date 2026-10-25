@@ -8,9 +8,10 @@ the redefinition that shaped v0.2): the GTA V postprocess kill feedback —
 that quickly appears and slowly vanishes**. Version zero keeps the two
 headline knobs requested for the GUI:
 
-- **Color** — the flash color, freely as R/G/B 0..1 channels (default: the
-  GTA-ish blue 0.15 / 0.45 / 1.00)
-- **Duration** — seconds from onset to fully gone (default: 1.5)
+- **Color** — the flash color, freely as R/G/B 0..1 channels (default:
+  cool cyan-blue 0.20 / 0.20 / 0.50)
+- **Duration** — seconds from onset to fully gone (default: 0.5; GUI
+  allows 0.10 – 15 s)
 
 Both are exposed through the stock **[Configure Mutators]** page (PlayInfo),
 exactly like the engine's own mutator settings are. Peak intensity is a
@@ -95,7 +96,7 @@ Timing constants sit in a named `const` block at the top of
 
 | Setting | Where | Class var |
 |---|---|---|
-| Duration (0.5-15 s) | [Configure Mutators] | `DurationSec` |
+| Duration (0.10-15 s) | [Configure Mutators] | `DurationSec` |
 | Color R/G/B (0-1) | [Configure Mutators] | `ColorR`, `ColorG`, `ColorB` |
 | Peak intensity | UT2004.ini | `FlashIntensity` |
 
@@ -103,7 +104,7 @@ Ini section: `[FragFeedback.FragFeedbackMutator]` in `UT2004.ini`
 (PlayInfo saves there natively, mirroring `RespawnDelay.RespawnDelay`).
 
 Design rule observed throughout: **every tweakable is a `var() config`**
-with engine-friendly extras strings (`"8;0.5:15.0"`), so any file-level
+with engine-friendly extras strings (`"8;0.1:15.0"`), so any file-level
 setting can graduate into the GUI in one `AddSetting` line.
 
 ## Console helper (v0 testing)
@@ -143,7 +144,7 @@ package up to date after class changes), runs `wine UCC.exe make`,
 - `ucc exportcache` regenerated the mutator `.ucl`.
 - Headless `ucc server DM-Corrugation?...?mutator=FragFeedback.FragFeedbackMutator?MinPlayers=8`:
   mutator + rules register with the new defaults
-  (`duration=1.50 s, color = 0.15,0.45,1.00 intensity = 0.80`), no runtime
+  (`duration=0.50 s, color = 0.20,0.20,0.50 intensity = 0.80`), no runtime
   errors over boot and match start.
 - Human screen test (flash pop/decay + GUI knobs): pending, via
   `tools/test.sh` or normal play; `mutate fragfeedbacktest` for a

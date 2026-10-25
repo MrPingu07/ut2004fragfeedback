@@ -8,9 +8,9 @@ Description="Kill feedback in GTA V style: whenever you frag someone, your scree
 ; -- mutator GUI ([Configure Mutators] / PlayInfo) -----------------------------------
 FlashGroup="Frag Feedback"
 DurationDisplayText="Duration (seconds)"
-DurationDescText="Total seconds the colored screen flash takes from its quick onset to fully gone, after each of your frags."
+DurationDescText="Total seconds the colored screen flash takes from its quick onset to fully gone, after each of your frags (minimum 0.1 seconds)."
 ColorRDisplayText="Color R (0-1)"
-ColorRDescText="Red channel of the flash. GTA-ish blue default is 0.15 / 0.45 / 1.00; a red flash would be 0.9 / 0.05 / 0.05."
+ColorRDescText="Red channel of the flash. Default is 0.20 / 0.20 / 0.50 (cool cyan-blue); a red flash would be 0.9 / 0.05 / 0.05."
 ColorGDisplayText="Color G (0-1)"
 ColorGDescText="Green channel of the flash."
 ColorBDisplayText="Color B (0-1)"

@@ -24,8 +24,8 @@ tweaks and is one line away from the GUI.
 | Effect | full-screen additive quad in the configured color |
 | Onset | quick ramp-up (~10 % of the duration, >= 0.08 s) |
 | Decay | slow linear fade to zero at the configured duration |
-| Color | GTA-ish blue: R 0.15 / G 0.45 / B 1.00 |
-| Duration | 1.5 seconds, fully configurable from the GUI |
+| Color | cool cyan-blue: R 0.20 / G 0.20 / B 0.50 |
+| Duration | 0.50 seconds by default (GUI allows 0.10 – 15 s) |
 | Peak intensity | 0.8 (file level: `FlashIntensity`) |
 
 Team kills and suicides stay silent. The feedback is private to the
@@ -36,7 +36,7 @@ killer's screen — other players see nothing.
 1. Go to **Instant Action** (or a server setup screen), pick **Mutators**,
    select **GTA V Frag Feedback** and press **[Configure Mutators]**.
 2. Set **Duration (seconds)** and **Color R/G/B (0–1)**.
-   - GTA-ish blue (default): 0.15 / 0.45 / 1.00
+   - Default (cool cyan-blue): 0.20 / 0.20 / 0.50 —
    - Red: 0.9 / 0.05 / 0.05 —
    - Green: 0.1 / 0.9 / 0.1 —
    - White: 1.0 / 1.0 / 1.0
@@ -52,10 +52,10 @@ mutate fragfeedbacktest      # show the flash without fragging anyone
 
 ```ini
 [FragFeedback.FragFeedbackMutator]
-DurationSec=1.500000
-ColorR=0.150000
-ColorG=0.450000
-ColorB=1.000000
+DurationSec=0.500000
+ColorR=0.200000
+ColorG=0.200000
+ColorB=0.500000
 FlashIntensity=0.800000      ; peak brightness (0-1), dim to taste
 ```
 
