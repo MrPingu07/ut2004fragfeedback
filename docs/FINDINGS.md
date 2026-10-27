@@ -102,19 +102,29 @@ appends `EditPackages=FragFeedback` exactly once, right after the last
   `HudOverlay.Destroyed` removes itself from the attached HUD.
   - Defaults are local-only (`RemoteRole=ROLE_None`) — a subclass must set
     `RemoteRole=ROLE_SimulatedProxy` to reach network clients.
-- `Engine.Interaction` / `InteractionMaster.AddInteraction(...)` can also
-  draw HUD on the client, but requires the client machine to run the
-  registration code itself (fine through a replicated proxy, but
-  HudOverlay is the engine-blessed, narrower path).
+  - **Not usable for a behind-the-HUD effect**: in `HUD.PostRender`,
+    `Overlays[i].Render(Canvas)` (line 325) runs after `DrawHud(Canvas)`
+    (line 322), so an overlay always covers the HUD.
+- `Engine.Interaction`: `PreRender(Canvas)` is called right after the world
+  is rendered but **before the HUD and the first-person weapon**;
+  `PostRender(Canvas)` runs after the HUD. Registered client-side through
+  `Player.InteractionMaster.AddInteraction(Name, Player)` (or a global
+  interaction without the Player), and removed with `RemoveInteraction`.
+  - Only interactions with `bVisible=True` are rendered.
+  - It is an Object, not an Actor: it cannot be replicated itself. The
+    client must create it locally (our replicated flash proxy does this).
 - `Engine.LocalMessage` (`ClientReceive`) could spawn client visuals too,
   but carries no per-player configuration channels (only int Switch + PRI
   objects); rejected for our "arbitrary color + duration" requirement.
-- **Decision: replicated `HudOverlay`** class (renamed from the prototype's
-  `FragFeedbackBanner` to `FragFeedbackFlash`)
-  (`RemoteRole=ROLE_SimulatedProxy`, `bOnlyRelevantToOwner=True`,
-  `Owner` = the player's PlayerController), spawned by the server mutator in
-  `ModifyPlayer`, pushed one-shot per kill through a reliable
-  server→client remote call (`ClientShowFlash`).
+- **Decision: replicated `FragFeedbackFlash` Actor + local
+  `FragFeedbackFlashInteraction`** (the proxy was renamed from the
+  prototype's `FragFeedbackBanner`; it used to be a `HudOverlay`).
+  The Actor (`RemoteRole=ROLE_SimulatedProxy`,
+  `bOnlyRelevantToOwner=True`, `Owner` = the player's PlayerController) is
+  spawned by the server mutator in `ModifyPlayer` and pushed one-shot per
+  kill through a reliable server→client remote call (`ClientShowFlash`).
+  On the client it registers the Interaction, whose `PreRender` calls the
+  proxy's `DrawFlash` — giving the flash a layer behind the HUD.
 
 ## Canvas primitives used (from the exported `Engine.Canvas`)
 
@@ -127,12 +137,12 @@ appends `EditPackages=FragFeedback` exactly once, right after the last
   ERenderStyle.STY_Additive` and the fade envelope carried by the
   DrawColor alpha byte — stock engine texture and stock blend path, no
   custom materials needed.
-- Shared-canvas courtesy learned from HUD internals: HUD draws *before*
-  overlays and continues with weapon/info rendering right after the
-  overlay loop, so `Render(Canvas)` must restore every canvas property it
-  touches (Font, FontScaleX/Y, Style, DrawColor, Z, OrgX/Y, ClipX/Y,
-  CurX/Y, CurYL, ColorModulate, bCenter, bNoSmooth, bRenderLevel) — done
-  in `FragFeedbackFlash.Render`.
+- Shared-canvas courtesy: the Interaction `PreRender` canvas is the same
+  one the HUD and first-person weapon draw on immediately afterwards, so
+  `DrawFlash(Canvas)` must restore every canvas property it touches
+  (Font, FontScaleX/Y, Style, DrawColor, Z, OrgX/Y, ClipX/Y, CurX/Y,
+  CurYL, ColorModulate, bCenter, bNoSmooth, bRenderLevel) — done in
+  `FragFeedbackFlash.DrawFlash`.
 
 ## Fonts available in this installation (banner-era research, kept for the record)
 

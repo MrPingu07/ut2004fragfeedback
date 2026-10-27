@@ -20,13 +20,14 @@ wanted). The first prototype (letterbox bars + WASTED-style banner text)
 was retired — the user clarified the target gesture was the *flash*; the
 renaming of its class to `FragFeedbackFlash` mirrors that.
 
-## Architecture (three classes)
+## Architecture (four classes)
 
 ```
 FragFeedback package
 ├── FragFeedbackMutator  (server)  entry point + GUI config + flash proxies
 ├── FragFeedbackRules    (server)  GameInfo.ScoreKill hook (GameRules chain)
-└── FragFeedbackFlash    (server+client, replicated)  the on-screen flash
+├── FragFeedbackFlash    (server+client, replicated)  proxy: config + trigger
+└── FragFeedbackFlashInteraction (client)  PreRender hook: draws behind HUD
 ```
 
 ### Why a GameRules instead of the mutator's own ScoreKill
@@ -39,9 +40,14 @@ spawns one `FragFeedbackRules` in `PostBeginPlay` and registers it with
 `Level.Game.AddGameModifier(...)`. Chain integrity with other mutators
 (RespawnDelay, GTAThirdPerson, vanilla) is preserved by construction.
 
-### Why a replicated HudOverlay proxy (kept from the prototype, still ideal)
+### Why a replicated flash proxy + local Interaction
 
-The kill happens on the **server**, the screen lives on the **client**:
+The kill happens on the **server**, the screen lives on the **client**.
+The proxy Actor carries replication; a client-only Interaction provides the
+correct render layer. `HudOverlay` was the original render hook, but its
+`Render` is called from `HUD.PostRender` **after** `DrawHud`, so the flash
+covered the HUD. `Interaction.PreRender` runs after the world and **before**
+the HUD and first-person weapon, which is the layer the effect wants.
 
 1. `ModifyPlayer(Pawn)` — called for every (re)spawn — makes the mutator
    `Spawn(class'FragFeedbackFlash', PC)` with `Owner = the player's
@@ -55,11 +61,15 @@ The kill happens on the **server**, the screen lives on the **client**:
 3. Per frag, `FragFeedbackRules.ScoreKill` → `Mutator.NotifyFrag`, which
      - skips suicides, team kills (team games), bots;
    - calls the reliable remote `ClientShowFlash()` on the killer's proxy.
-4. On the client, the proxy attaches itself to `PlayerController.MyHUD`
-   via `HUD.AddHudOverlay` (`PostBeginPlay` for standalone/listen host,
-   `PostNetBeginPlay` for network clients, bounded `Timer` retries in
-   between), and `Render(Canvas)` runs while
-   `0 <= (TimeSeconds - SpawnAt) < FlashDuration`.
+4. On the client, the proxy registers a local
+   `FragFeedbackFlashInteraction` through
+   `Player.InteractionMaster.AddInteraction` (`PostBeginPlay` for
+   standalone/listen host, `PostNetBeginPlay` for network clients, bounded
+   `Timer` retries while the Player/InteractionMaster is not ready).
+5. The Interaction's `PreRender(Canvas)` calls the proxy's
+   `DrawFlash(Canvas)` while
+   `0 <= (TimeSeconds - SpawnAt) < FlashDuration`; `Destroyed` removes the
+   Interaction again.
 
 Alternatives that were rejected (still relevant for future work):
 - *`PlayerController.ClientFlash()`* — the engine's own damage flash is a
@@ -67,12 +77,15 @@ Alternatives that were rejected (still relevant for future work):
   engine's native implementation, killing the Duration/Color requirement.
 - *LocalMessage* — the draw color/lifetime is nailed in message-class
   defaults, no per-player config channel.
-- *Interaction* — works for HUD drawing but heavier (input handling,
-  client-side registration than a HudOverlay proxy).
+- *HudOverlay* — simplest for replication, but always draws after the HUD;
+  rejected once the effect had to sit behind it. Kept here as the reason
+  the split proxy/Interaction design exists.
+- *Custom HUD subclass* — would draw before `Super.PostRender`, but each
+  gametype has a different HUD class; wrapping them all is more invasive.
 
 ## The visual: quick-in / slow-out screen flash
 
-While the Duration window is open, `Render(Canvas)` draws **one
+While the Duration window is open, `DrawFlash(Canvas)` draws **one
 full-screen quad** (`Engine.WhiteTexture` 1×1) with
 `C.Style = ERenderStyle.STY_Additive` in the configured color:
 

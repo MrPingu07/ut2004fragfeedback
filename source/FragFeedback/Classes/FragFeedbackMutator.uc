@@ -22,9 +22,10 @@
 //     - hooks GameInfo.ScoreKill(Killer, Killed) chained via Super so the
 //       vanilla rules and other mutators keep working
 //
-//   FragFeedbackFlash    (Engine.HudOverlay subclass, one per human player)
-//     - replicated proxy that lives where the player's screen lives; it draws
-//       the full-screen colored flash (quick in, slow out)
+//   FragFeedbackFlash    (Engine.Actor subclass, one per human player)
+//     - replicated proxy that lives where the player's screen lives; it
+//       registers a local Interaction that draws the full-screen colored
+//       flash (quick in, slow out) *behind* the HUD
 //
 // Console helper (instant action / listen server):
 //   mutate fragfeedbacktest     show the flash without killing anyone
@@ -108,7 +109,7 @@ function PostBeginPlay()
 }
 
 // ---------------------------------------------------------------------------
-// Player setup: every (re)spawn of a human gets a persistent HUD proxy with
+// Player setup: every (re)spawn of a human gets a persistent flash proxy with
 // the server configuration replicated into it. Bots don't get one (no screen).
 // ---------------------------------------------------------------------------
 

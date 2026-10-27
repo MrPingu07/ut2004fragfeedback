@@ -22,6 +22,7 @@ tweaks and is one line away from the GUI.
 | Element | Default |
 |---|---|
 | Effect | full-screen additive quad in the configured color |
+| Layer | behind the HUD and first-person weapon (Interaction.PreRender) |
 | Onset | quick ramp-up (~10 % of the duration, >= 0.08 s) |
 | Decay | slow linear fade to zero at the configured duration |
 | Color | cool cyan-blue: R 0.20 / G 0.20 / B 0.50 |
@@ -104,7 +105,9 @@ wine UT2004.exe "DM-Corrugation?game=DeathMatch?mutator=FragFeedback.FragFeedbac
 source/FragFeedback/Classes/
     FragFeedbackMutator.uc   server-side mutator: GUI config, kill routing
     FragFeedbackRules.uc     GameRules hook (ScoreKill chain, other-mutator-safe)
-    FragFeedbackFlash.uc     replicated HudOverlay: the flash itself
+    FragFeedbackFlash.uc     replicated flash proxy: config + trigger
+    FragFeedbackFlashInteraction.uc
+                             client Interaction: draws the flash behind the HUD
 install/FragFeedback.int
 tools/build.sh
 tools/test.sh

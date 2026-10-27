@@ -2,17 +2,23 @@
 // FragFeedbackFlash.uc
 //
 // The on-screen part of the FragFeedback mutator: the GTA V-style screen
-// flash. An Engine.HudOverlay proxy spawned by the server mutator with
-// Owner = the fragging player's PlayerController, so it replicates only to
-// that player (bOnlyRelevantToOwner) and its server->client remote calls
-// land exactly on their screen.
+// flash. An Actor proxy spawned by the server mutator with Owner = the
+// fragging player's PlayerController, so it replicates only to that player
+// (bOnlyRelevantToOwner) and its server->client remote calls land exactly on
+// their screen.
 //
 // Data flow:
 //   server mutator (PostBeginPlay config)  -> replicated initial vars at spawn
 //   server mutator (ScoreKill)             -> reliable remote call
 //                                             ClientShowFlash()
-//   client                                  -> Render(Canvas) full-screen
-//                                             quad for the Duration window
+//   client                                  -> local Interaction PreRender
+//                                             -> DrawFlash(Canvas) full-screen
+//                                                quad for the Duration window
+//
+// The flash must render *behind* the HUD, so this class does not use
+// HudOverlay (its Render runs after HUD.DrawHud). Instead, TryAttach registers
+// a FragFeedbackFlashInteraction on the owning player; the engine calls its
+// PreRender before the HUD and the first-person weapon.
 //
 // The effect is deliberately minimal (per the user's definition of "GTA
 // V-like frag feedback"):
@@ -25,7 +31,7 @@
 // FragFeedbackMutator and arrive here as replicated values; peak intensity
 // is a file-level (UT2004.ini) setting.
 //=============================================================================
-class FragFeedbackFlash extends HudOverlay
+class FragFeedbackFlash extends Actor
 	config(UT2004);
 
 // ---------------------------------------------------------------------------
@@ -50,8 +56,10 @@ var float FlashIntensity;
 /** TimeSeconds the flash started; 0 = inactive. */
 var transient float SpawnAt;
 
-/** HUD attachment bookkeeping (bounded retries). */
-var transient bool bHudAttached;
+/** Client-side render hook (created locally, one per proxy). */
+var transient FragFeedbackFlashInteraction FlashInteraction;
+
+/** Attachment bookkeeping (bounded retries). */
 var transient int AttachTries;
 
 // envelope: quick rise, slow linear fall (fractions of FlashDuration)
@@ -86,10 +94,10 @@ simulated function ClientShowFlash()
 }
 
 // ---------------------------------------------------------------------------
-// HUD attachment (three cases)
-//   NM_Standalone / listen-server host : PostBeginPlay (local HUD exists)
+// Render-hook attachment (three cases)
+//   NM_Standalone / listen-server host : PostBeginPlay (local Player exists)
 //   network client                     : PostNetBeginPlay
-//   early or missing HUD               : bounded Timer retries
+//   early or missing InteractionMaster : bounded Timer retries
 // ---------------------------------------------------------------------------
 
 simulated event PostBeginPlay()
@@ -107,13 +115,14 @@ simulated event PostNetBeginPlay()
 
 simulated function TryAttach()
 {
-	local PlayerController PC;
+	local PlayerController			PC;
+	local FragFeedbackFlashInteraction	I;
 
-	if ( bHudAttached || Level.NetMode == NM_DedicatedServer )
+	if ( FlashInteraction != None || Level.NetMode == NM_DedicatedServer )
 		return;
 
 	PC = PlayerController(Owner);
-	if ( PC == None || PC.MyHUD == None )
+	if ( PC == None || PC.Player == None || PC.Player.InteractionMaster == None )
 	{
 		AttachTries += 1;
 		if ( AttachTries <= 10 )
@@ -121,38 +130,47 @@ simulated function TryAttach()
 		return;
 	}
 
-	// HudOverlay standard join: HUD.AddHudOverlay appends it to the overlay
-	// array and calls its Render(C) from the HUD's PostRender loop
-	PC.MyHUD.AddHudOverlay(self);
-	bHudAttached = true;
+	// Local Interaction: the engine feeds it PreRender() right after the
+	// world is drawn and before HUD.PostRender (unlike HudOverlay, whose
+	// Render runs after DrawHud and therefore covers the HUD).
+	I = FragFeedbackFlashInteraction(
+		PC.Player.InteractionMaster.AddInteraction(
+			"FragFeedback.FragFeedbackFlashInteraction", PC.Player));
+	if ( I == None )
+	{
+		AttachTries += 1;
+		if ( AttachTries <= 10 )
+			SetTimer(0.25, true);
+		return;
+	}
+
+	I.Flash = Self;
+	FlashInteraction = I;
 }
 
 simulated function Timer()
 {
 	SetTimer(0.0, false);		// one-shot poll
-	if ( !bHudAttached )
+	if ( FlashInteraction == None )
 		TryAttach();
 }
 
 simulated function Destroyed()
 {
-	local PlayerController PC;
-
-	if ( bHudAttached )
+	if ( FlashInteraction != None )
 	{
-		PC = PlayerController(Owner);
-		if ( PC != None && PC.MyHUD != None )
-			PC.MyHUD.RemoveHudOverlay(self);
+		FlashInteraction.Cleanup();
+		FlashInteraction = None;
 	}
 
 	Super.Destroyed();
 }
 
 // ---------------------------------------------------------------------------
-// Rendering
+// Rendering (called from FragFeedbackFlashInteraction.PreRender)
 // ---------------------------------------------------------------------------
 
-simulated function Render(Canvas C)
+simulated function DrawFlash(Canvas C)
 {
 	local float	Elapsed, Alpha, AttackTime;
 	local Font	OldFont;
@@ -235,7 +253,7 @@ simulated function byte ChannelByte(float Channel)
 }
 
 // ---------------------------------------------------------------------------
-// Defaults: HudOverlay bean defaults plus sane network behavior for a
+// Defaults: passive Actor defaults plus sane network behavior for a
 // per-player proxy; live values arrive replicated from the mutator
 // ---------------------------------------------------------------------------
 
