@@ -1,20 +1,32 @@
 [Public]
-Object=(Name=FragFeedback.FragFeedbackMutator,Class=Class,MetaClass=Engine.Mutator,Description="GTA V Frag Feedback,Kill feedback in GTA V style: when you frag someone, your screen flashes in your color (blue by default) - it quickly appears and slowly vanishes. Color and duration are configurable from the Mutators screen.")
+Object=(Name=FragFeedback.FragFeedbackMutator,Class=Class,MetaClass=Engine.Mutator,Description="GTA V Frag Feedback,Kill feedback in GTA V style: when you frag someone, your screen flashes in your color (blue by default) - it quickly appears and slowly vanishes. When you take damage, a second, subtler red flash does the same. Both durations and colors are configurable from the Mutators screen.")
 
 [FragFeedback.FragFeedbackMutator]
 FriendlyName="GTA V Frag Feedback"
-Description="Kill feedback in GTA V style: whenever you frag someone, your screen flashes with a full-screen colored postprocess effect (blue by default) that quickly appears and slowly vanishes. Team kills stay silent. Color (RGB channels) and duration are configurable from the mutators screen [Configure Mutators button]."
+Description="Feedback in GTA V style: whenever you frag someone, your screen flashes with a full-screen colored postprocess effect (blue by default) that quickly appears and slowly vanishes. Whenever you take damage, a separate mostly transparent red flash does the same. Team kills stay silent. Both effects have independent duration and RGB color settings in the mutators screen [Configure Mutators button]; set a duration to 0 to disable that effect. Vanilla ScreenFlashes is switched off when this mutator runs (re-enable it manually if you stop using the mutator)."
 
-; -- mutator GUI ([Configure Mutators] / PlayInfo) -----------------------------------
+; -- mutator GUI ([Configure Mutators] / PlayInfo) - frag feedback -------------------
 FlashGroup="Frag Feedback"
 DurationDisplayText="Duration (seconds)"
-DurationDescText="Total seconds the colored screen flash takes from its quick onset to fully gone, after each of your frags (minimum 0.1 seconds)."
+DurationDescText="Total seconds the colored screen flash takes from its quick onset to fully gone, after each of your frags. Set to 0 to disable the frag flash (range 0.0 - 15.0)."
 ColorRDisplayText="Color R (0-1)"
-ColorRDescText="Red channel of the flash. Default is 0.20 / 0.20 / 0.50 (cool cyan-blue); a red flash would be 0.9 / 0.05 / 0.05."
+ColorRDescText="Red channel of the frag flash. Default is 0.20 / 0.20 / 0.50 (cool cyan-blue); a red flash would be 0.9 / 0.05 / 0.05."
 ColorGDisplayText="Color G (0-1)"
-ColorGDescText="Green channel of the flash."
+ColorGDescText="Green channel of the frag flash."
 ColorBDisplayText="Color B (0-1)"
-ColorBDescText="Blue channel of the flash."
+ColorBDescText="Blue channel of the frag flash."
+
+; -- mutator GUI ([Configure Mutators] / PlayInfo) - damage feedback ----------------
+DamageGroup="Damage Feedback"
+DamageDurationDisplayText="Duration (seconds)"
+DamageDurationDescText="Total seconds the colored screen flash takes from its quick onset to fully gone, after you take damage. Set to 0 to disable the damage flash (range 0.0 - 15.0)."
+DamageColorRDisplayText="Color R (0-1)"
+DamageColorRDescText="Red channel of the damage flash. Default is a mostly transparent red; raise DamageFlashIntensity in UT2004.ini if it is too subtle."
+DamageColorGDisplayText="Color G (0-1)"
+DamageColorGDescText="Green channel of the damage flash."
+DamageColorBDisplayText="Color B (0-1)"
+DamageColorBDescText="Blue channel of the damage flash."
 
 ; -- console feedback ----------------------------------------------------------------
-MsgTestShown="FragFeedback: fake flash displayed."
+MsgTestShown="FragFeedback: fake frag flash displayed."
+MsgDamageTestShown="FragFeedback: fake damage flash displayed."

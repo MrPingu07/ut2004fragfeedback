@@ -1,52 +1,75 @@
-# FragFeedback — GTA V-style frag feedback for Unreal Tournament 2004
+# FragFeedback — GTA V-style feedback for Unreal Tournament 2004
 
-A UT2004 mutator that reacts to every frag **you** score with the GTA V
-postprocess kill feedback: your **whole screen flashes** in a color (blue
-by default) that **quickly appears and slowly vanishes**. No letters, no
-bars — just the colored screen flash, exactly the gesture GTA V teaches.
+A UT2004 mutator with two GTA V-style screen-flash effects:
 
-**Version zero is built to be customized from the game's own GUI:** the
-flash **Color** (R/G/B channels, 0–1) and **Duration** (seconds) are
-exposed to the stock **[Configure Mutators]** page — no file editing
-required. Peak intensity is also a config var (`FlashIntensity`) for ini
-tweaks and is one line away from the GUI.
+- **Frag feedback** — when **you** score a frag, your **whole screen
+  flashes** in a color (blue by default) that **quickly appears and slowly
+  vanishes**.
+- **Damage feedback** — when **you take damage**, a second, separate flash
+  (mostly transparent red by default) does the same.
+
+No letters, no bars — just the colored screen flashes. Both effects have
+independent **Duration** and **Color (R/G/B)** settings exposed to the
+stock **[Configure Mutators]** page, so everything is tunable from the
+game's own GUI without editing files. Either duration can be set to **0**
+to disable that effect entirely.
+
+Peak brightness is a file-level config var for each effect
+(`FlashIntensity` and `DamageFlashIntensity`) for ini tweaks.
 
 > History: the first prototype (letterbox + WASTED banner) was replaced in
 > v0.2 after a review round where the goal was clarified: "GTA V-like"
 > meant the blue screen-flash postprocess effect, not the death banner.
+> The damage flash, separate per-effect settings and periodic server
+> re-enforcement arrived in v1.2.
 
 ---
 
 ## What you get on screen
 
-| Element | Default |
-|---|---|
-| Effect | full-screen additive quad in the configured color |
-| Layer | behind the HUD and first-person weapon (Interaction.PreRender) |
-| Onset | quick ramp-up (~10 % of the duration, >= 0.08 s) |
-| Decay | slow linear fade to zero at the configured duration |
-| Color | cool cyan-blue: R 0.20 / G 0.20 / B 0.50 |
-| Duration | 0.50 seconds by default (GUI allows 0.10 – 15 s) |
-| Peak intensity | 0.8 (file level: `FlashIntensity`) |
+| Element | Frag feedback | Damage feedback |
+|---|---|---|
+| Trigger | you frag an enemy | you take damage |
+| Effect | full-screen additive quad in the configured color | same |
+| Layer | behind the HUD and first-person weapon (Interaction.PreRender) | same |
+| Onset | quick ramp-up (~10 % of the duration, >= 0.08 s) | same |
+| Decay | slow linear fade to zero at the configured duration | same |
+| Default color | cool cyan-blue: R 0.20 / G 0.20 / B 0.50 | transparent red: R 0.75 / G 0.00 / B 0.00 |
+| Default duration | 0.50 seconds (GUI allows 0 – 15 s) | 0.50 seconds (GUI allows 0 – 15 s) |
+| Default peak intensity | 0.8 (`FlashIntensity`) | 0.3 (`DamageFlashIntensity`) |
 
-Team kills and suicides stay silent. The feedback is private to the
-killer's screen — other players see nothing.
+Team kills and suicides stay silent for the frag flash. The feedback is
+private to the affected player's screen — other players see nothing.
+
+While the mutator is active it also switches the stock UT2004
+**ScreenFlashes** option off (the client's `ScreenFlashes=False` ini value),
+because the new damage feedback replaces the vanilla damage flash and the
+two would otherwise stack.
 
 ## The mutator in action
 
 1. Go to **Instant Action** (or a server setup screen), pick **Mutators**,
    select **GTA V Frag Feedback** and press **[Configure Mutators]**.
-2. Set **Duration (seconds)** and **Color R/G/B (0–1)**.
-   - Default (cool cyan-blue): 0.20 / 0.20 / 0.50 —
-   - Red: 0.9 / 0.05 / 0.05 —
-   - Green: 0.1 / 0.9 / 0.1 —
-   - White: 1.0 / 1.0 / 1.0
-3. Play. Frag → flash pops in, then drains away over Duration.
+2. Set the two independent groups:
+   - **Frag Feedback** — *Duration (seconds)* and *Color R/G/B (0–1)*.
+   - **Damage Feedback** — *Duration (seconds)* and *Color R/G/B (0–1)*.
+3. Set any duration to **0** to disable that effect.
+4. Play. Frag → blue flash pops in and drains away; take a hit → red flash
+   does the same. Both can overlap without cancelling each other.
 
-Console helper (Instant Action / listen server):
+Color examples (same values work for either group):
+
+- Default frag (cool cyan-blue): 0.20 / 0.20 / 0.50
+- Default damage (transparent red): 0.75 / 0.00 / 0.00
+- Red: 0.9 / 0.05 / 0.05
+- Green: 0.1 / 0.9 / 0.1
+- White: 1.0 / 1.0 / 1.0
+
+Console helpers (Instant Action / listen server):
 
 ```
-mutate fragfeedbacktest      # show the flash without fragging anyone
+mutate fragfeedbacktest        # show the frag flash without fragging anyone
+mutate fragfeedbackdamagetest  # show the damage flash without being hit
 ```
 
 ## File-level settings (optional, `UT2004.ini`)
@@ -57,10 +80,16 @@ DurationSec=0.500000
 ColorR=0.200000
 ColorG=0.200000
 ColorB=0.500000
-FlashIntensity=0.800000      ; peak brightness (0-1), dim to taste
+FlashIntensity=0.800000          ; frag peak brightness (0-1)
+DamageDurationSec=0.500000
+DamageColorR=0.750000
+DamageColorG=0.000000
+DamageColorB=0.000000
+DamageFlashIntensity=0.300000    ; damage peak brightness (0-1)
 ```
 
-Same section the GUI writes to; same style as your other mutators.
+A duration of `0.000000` disables that effect. Same section the GUI writes
+to; same style as your other mutators.
 
 ## Install (already done on this machine)
 
@@ -96,18 +125,25 @@ wine UT2004.exe "DM-Corrugation?game=DeathMatch?mutator=FragFeedback.FragFeedbac
   redirect server or by copying `System/FragFeedback.u` manually).
 - Settings changed in the GUI take effect at the next map load (each match
   re-spawns the mutator and the proxies; standard PlayInfo behavior).
-- Proxy configuration (color/duration/intensity) is replicated; the effect
-  itself renders client-side from replicated values.
+- Proxy configuration (frag and damage color/duration/intensity) is
+  replicated initially **and re-sent by the server every 10 seconds**, so
+  clients always converge on the server's authoritative values. The effects
+  themselves render client-side from those values.
+- When a client first attaches its flash proxy, it runs the local equivalent
+  of the stock Game Settings checkbox:
+  `set ini:Engine.Engine.ViewportManager ScreenFlashes False`. Like a GUI
+  change, this persists in that client's `UT2004.ini`; re-enable Screen
+  Flashes manually if you later stop using the mutator.
 
 ## Project layout
 
 ```
 source/FragFeedback/Classes/
-    FragFeedbackMutator.uc   server-side mutator: GUI config, kill routing
-    FragFeedbackRules.uc     GameRules hook (ScoreKill chain, other-mutator-safe)
-    FragFeedbackFlash.uc     replicated flash proxy: config + trigger
+    FragFeedbackMutator.uc   server-side mutator: GUI config, frag/damage routing
+    FragFeedbackRules.uc     GameRules hooks (ScoreKill + NetDamage, chain-safe)
+    FragFeedbackFlash.uc     replicated flash proxy: config + triggers + drawing
     FragFeedbackFlashInteraction.uc
-                             client Interaction: draws the flash behind the HUD
+                             client Interaction: draws the flashes behind the HUD
 install/FragFeedback.int
 tools/build.sh
 tools/test.sh
@@ -115,11 +151,11 @@ docs/FINDINGS.md             environment + engine research (verified locally)
 docs/APPROACH.md             architecture + design decisions + scope cuts
 ```
 
-## Roadmap (after v0)
+## Roadmap
 
 - Own-death flash (the GTA V "you died" blue treatment when YOU die).
 - GUI presets dropdown for colors (engine supports `Select` render type).
-- Intensity promoted to the GUI (one `AddSetting` line).
+- Intensity promoted to the GUI (one `AddSetting` line per effect).
 - Per-weapon tints, kill-streak escalation intensities.
 
 ## Development notes / troubleshooting

@@ -2,34 +2,38 @@
 // FragFeedbackFlash.uc
 //
 // The on-screen part of the FragFeedback mutator: the GTA V-style screen
-// flash. An Actor proxy spawned by the server mutator with Owner = the
-// fragging player's PlayerController, so it replicates only to that player
+// flashes. An Actor proxy spawned by the server mutator with Owner = the
+// player's PlayerController, so it replicates only to that player
 // (bOnlyRelevantToOwner) and its server->client remote calls land exactly on
-// their screen.
+// their screen. It carries two independent effects: the frag flash and the
+// damage flash, each with its own duration, color and intensity.
 //
 // Data flow:
 //   server mutator (PostBeginPlay config)  -> replicated initial vars at spawn
 //   server mutator (ScoreKill)             -> reliable remote call
 //                                             ClientShowFlash()
+//   server mutator (NetDamage)             -> reliable remote call
+//                                             ClientShowDamageFlash()
 //   client                                  -> local Interaction PreRender
-//                                             -> DrawFlash(Canvas) full-screen
-//                                                quad for the Duration window
+//                                             -> DrawFlash/DrawDamageFlash
+//                                                full-screen quad for the
+//                                                effect's Duration window
 //
 // The flash must render *behind* the HUD, so this class does not use
 // HudOverlay (its Render runs after HUD.DrawHud). Instead, TryAttach registers
 // a FragFeedbackFlashInteraction on the owning player; the engine calls its
 // PreRender before the HUD and the first-person weapon.
 //
-// The effect is deliberately minimal (per the user's definition of "GTA
-// V-like frag feedback"):
+// Each effect is deliberately minimal (per the user's definition of "GTA
+// V-like feedback"):
 //
-//   a full-screen colored quad drawn STY_Additive with the configured color
+//   a full-screen colored quad drawn STY_Additive with the effect's color
 //   that *quickly appears* (alpha ramps up over an attack window, ~10% of
 //   the duration) and *slowly vanishes* (linear decay for the rest).
 //
-// Color and Duration are configured from the [Configure Mutators] GUI on
+// Colors and Durations are configured from the [Configure Mutators] GUI on
 // FragFeedbackMutator and arrive here as replicated values; peak intensity
-// is a file-level (UT2004.ini) setting.
+// is a file-level (UT2004.ini) setting per effect.
 //=============================================================================
 class FragFeedbackFlash extends Actor
 	config(UT2004);
@@ -46,15 +50,32 @@ var float ColorR;
 var float ColorG;
 var float ColorB;
 
-/** Peak brightness of the flash (applied through the alpha channel). */
+/** Peak brightness of the frag flash (applied through the alpha channel). */
 var float FlashIntensity;
+
+/** Damage flash: total seconds from onset to fully gone (0 = disabled). */
+var float DamageDuration;
+
+/** Damage flash color channels, 0.0 .. 1.0. Default: mostly transparent red. */
+var float DamageColorR;
+var float DamageColorG;
+var float DamageColorB;
+
+/** Peak brightness of the damage flash (applied through the alpha channel). */
+var float DamageFlashIntensity;
 
 // ---------------------------------------------------------------------------
 // Machine local state
 // ---------------------------------------------------------------------------
 
-/** TimeSeconds the flash started; 0 = inactive. */
+/** TimeSeconds the frag flash started; 0 = inactive. */
 var transient float SpawnAt;
+
+/** TimeSeconds the damage flash started; 0 = inactive. */
+var transient float DamageSpawnAt;
+
+/** Vanilla ScreenFlashes has been switched off on this client. */
+var transient bool bDisabledVanillaFlashes;
 
 /** Client-side render hook (created locally, one per proxy). */
 var transient FragFeedbackFlashInteraction FlashInteraction;
@@ -74,11 +95,17 @@ replication
 {
 	// server -> client: initial configuration bundle
 	reliable if ( bNetInitial && (Role == ROLE_Authority) )
-		FlashDuration, ColorR, ColorG, ColorB, FlashIntensity;
+		FlashDuration, ColorR, ColorG, ColorB, FlashIntensity,
+		DamageDuration, DamageColorR, DamageColorG, DamageColorB,
+		DamageFlashIntensity;
 
-	// server -> client: one-shot trigger per frag (owner-only actor)
+	// server -> client: one-shot triggers (owner-only actor)
 	reliable if ( Role == ROLE_Authority )
-		ClientShowFlash;
+		ClientShowFlash, ClientShowDamageFlash;
+
+	// server -> client: periodic authoritative settings refresh (every 10 s)
+	reliable if ( Role == ROLE_Authority )
+		ClientApplyConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,6 +118,39 @@ simulated function ClientShowFlash()
 		return;
 
 	SpawnAt = Level.TimeSeconds;
+}
+
+simulated function ClientShowDamageFlash()
+{
+	if ( Level.NetMode == NM_DedicatedServer )
+		return;
+
+	DamageSpawnAt = Level.TimeSeconds;
+}
+
+/**
+ * Periodically called by the server mutator (every 10 seconds) to re-apply
+ * the authoritative configuration on the client. Initial values still arrive
+ * with the actor's bNetInitial bundle; this keeps them enforced afterwards.
+ */
+simulated function ClientApplyConfig(float NewFlashDuration,
+	float NewColorR, float NewColorG, float NewColorB, float NewFlashIntensity,
+	float NewDamageDuration, float NewDamageColorR, float NewDamageColorG,
+	float NewDamageColorB, float NewDamageFlashIntensity)
+{
+	if ( Level.NetMode == NM_DedicatedServer )
+		return;
+
+	FlashDuration		= NewFlashDuration;
+	ColorR			= NewColorR;
+	ColorG			= NewColorG;
+	ColorB			= NewColorB;
+	FlashIntensity		= NewFlashIntensity;
+	DamageDuration		= NewDamageDuration;
+	DamageColorR		= NewDamageColorR;
+	DamageColorG		= NewDamageColorG;
+	DamageColorB		= NewDamageColorB;
+	DamageFlashIntensity	= NewDamageFlashIntensity;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +190,10 @@ simulated function TryAttach()
 		return;
 	}
 
+	// This mutator replaces the stock damage flash; switch the client's
+	// ScreenFlashes option off so the two effects do not stack.
+	DisableVanillaScreenFlashes(PC);
+
 	// Local Interaction: the engine feeds it PreRender() right after the
 	// world is drawn and before HUD.PostRender (unlike HudOverlay, whose
 	// Render runs after DrawHud and therefore covers the HUD).
@@ -146,6 +210,21 @@ simulated function TryAttach()
 
 	I.Flash = Self;
 	FlashInteraction = I;
+}
+
+/**
+ * Switch the client's vanilla ScreenFlashes option off (UT2004.ini, the same
+ * ini key the stock Game Settings checkbox writes). The mutator's damage
+ * flash is the replacement, so leaving the vanilla one on would double the
+ * effect. The write is local to each client and persists like a GUI change.
+ */
+simulated function DisableVanillaScreenFlashes(PlayerController PC)
+{
+	if ( bDisabledVanillaFlashes || PC == None )
+		return;
+
+	PC.ConsoleCommand("set ini:Engine.Engine.ViewportManager ScreenFlashes False");
+	bDisabledVanillaFlashes = True;
 }
 
 simulated function Timer()
@@ -172,6 +251,18 @@ simulated function Destroyed()
 
 simulated function DrawFlash(Canvas C)
 {
+	DrawFlashLayer(C, SpawnAt, FlashDuration, ColorR, ColorG, ColorB, FlashIntensity);
+}
+
+simulated function DrawDamageFlash(Canvas C)
+{
+	DrawFlashLayer(C, DamageSpawnAt, DamageDuration,
+		DamageColorR, DamageColorG, DamageColorB, DamageFlashIntensity);
+}
+
+simulated function DrawFlashLayer(Canvas C, float StartAt, float Duration,
+	float R, float G, float B, float Intensity)
+{
 	local float	Elapsed, Alpha, AttackTime;
 	local Font	OldFont;
 	local float OldSX, OldSY, OldOrgX, OldOrgY, OldClipX, OldClipY, OldCurX, OldCurY, OldCurYL;
@@ -180,23 +271,23 @@ simulated function DrawFlash(Canvas C)
 	local Plane OldColorModulate;
 	local bool	OldCenter, OldNoSmooth, OldRenderLevel;
 
-	if ( Level.NetMode == NM_DedicatedServer || SpawnAt <= 0.0 )
+	if ( Level.NetMode == NM_DedicatedServer || StartAt <= 0.0 )
 		return;
 
-	Elapsed = Level.TimeSeconds - SpawnAt;
-	if ( FlashDuration <= 0.0 || Elapsed < 0.0 || Elapsed >= FlashDuration )
+	Elapsed = Level.TimeSeconds - StartAt;
+	if ( Duration <= 0.0 || Elapsed < 0.0 || Elapsed >= Duration )
 		return;
 
-	// envelope: quick ramp-up, slow linear decline to zero at FlashDuration
-	AttackTime = FClamp(FlashInFrac * FlashDuration, MinAttackTime, FlashDuration * 0.8);
+	// envelope: quick ramp-up, slow linear decline to zero at Duration
+	AttackTime = FClamp(FlashInFrac * Duration, MinAttackTime, Duration * 0.8);
 	if ( Elapsed < AttackTime )
 		Alpha = Elapsed / AttackTime;
-	else if ( Elapsed < FlashDuration )
-		Alpha = 1.0 - (Elapsed - AttackTime) / (FlashDuration - AttackTime);
+	else if ( Elapsed < Duration )
+		Alpha = 1.0 - (Elapsed - AttackTime) / (Duration - AttackTime);
 	else
 		return;
 
-	Alpha = FClamp(Alpha, 0.0, 1.0) * FClamp(FlashIntensity, 0.0, 1.0);
+	Alpha = FClamp(Alpha, 0.0, 1.0) * FClamp(Intensity, 0.0, 1.0);
 	if ( Alpha <= 0.01 )
 		return;
 
@@ -221,7 +312,7 @@ simulated function DrawFlash(Canvas C)
 
 	// the flash: full-screen additive quad in the configured color
 	C.Style		= ERenderStyle.STY_Additive;
-	C.SetDrawColor(ChannelByte(ColorR), ChannelByte(ColorG), ChannelByte(ColorB),
+	C.SetDrawColor(ChannelByte(R), ChannelByte(G), ChannelByte(B),
 		int(255.0 * Alpha));
 	C.SetPos(0.0, 0.0);
 	C.DrawTile(Texture'Engine.WhiteTexture', C.ClipX, C.ClipY, 0.0, 0.0, 1.0, 1.0);
@@ -264,6 +355,11 @@ defaultproperties
 	ColorG=0.200000
 	ColorB=0.500000
 	FlashIntensity=0.800000
+	DamageDuration=0.500000
+	DamageColorR=0.750000
+	DamageColorG=0.000000
+	DamageColorB=0.000000
+	DamageFlashIntensity=0.300000
 
 	// tiny passive screen quad
 	RemoteRole=ROLE_SimulatedProxy

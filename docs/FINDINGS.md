@@ -79,19 +79,41 @@ appends `EditPackages=FragFeedback` exactly once, right after the last
   `config(UT2004)` is the right storage class declaration. Verified sections
   in this install's `UT2004.ini` / `GTAThirdPerson.ini`.
 
-## Kill-event hooks: Mutator vs GameRules
+## Kill/damage hooks: Mutator vs GameRules
 
 - `Engine.Mutator` is native; the export shows the script-side hook set but
-  **no `ScoreKill`** (it lives inside the native part).
+  **no `ScoreKill`/`NetDamage`** (they live inside the native part).
 - `Engine.GameRules` is **fully scriptable** and exports the whole chain:
   `GameInfo.ScoreKill(Killer, Killed)` → `GameRulesModifiers.ScoreKill(...)`
-  with explicit `NextGameRules.ScoreKill` chaining; vanilla precedent
-  `UnrealGame.BigHeadRules` (`function ScoreKill(Controller Killer,
-  Controller Killed)` + `Super/NextGameRules` call). Registered with
-  `GameInfo.AddGameModifier(GameRules)` (exported `GameInfo.uc:914`).
-- Decision: **FragFeedbackRules extends GameRules** spawns from the mutator
-  and chains `Super.ScoreKill`. No dependence on the opaque native Mutator
-  hook.
+  and `GameInfo.NetDamage(OriginalDamage, Damage, injured, instigatedBy,
+  HitLocation, Momentum, DamageType)` → `GameRulesModifiers.NetDamage(...)`,
+  with explicit `NextGameRules` chaining; vanilla precedents
+  `UnrealGame.BigHeadRules` (`ScoreKill`) and `XGame.VampireGameRules`
+  (`NetDamage`). Registered with `GameInfo.AddGameModifier(GameRules)`
+  (exported `GameInfo.uc:914`).
+- Decision: **FragFeedbackRules extends GameRules**, spawns from the mutator,
+  and chains `Super.ScoreKill`/`Super.NetDamage`. No dependence on the opaque
+  native Mutator hooks. `NetDamage` is the server-side point where every hit
+  is seen; `injured.Controller` is the player whose screen should flash, and
+  the chained `Damage` return value is passed through unchanged so gameplay
+  is untouched.
+
+## Stock damage flash (`ScreenFlashes`)
+
+- The stock Game Settings checkbox `GameScreenFlashes` is a `moCheckBox`
+  with `IniOption="ini:Engine.Engine.ViewportManager ScreenFlashes"` in
+  `XInterface.Tab_GameSettings` (exported source).
+- The GUI reads/writes it with
+  `ConsoleCommand("get ini:Engine.Engine.ViewportManager ScreenFlashes")`
+  and `ConsoleCommand("set ini:Engine.Engine.ViewportManager ScreenFlashes
+  <bool>")`; the corresponding config lives in the active client section
+  (`[WinDrv.WindowsClient]` / `[SDLDrv.SDLClient]` in this install).
+- `ScreenFlashes` is a native `Engine.Client` property (the name is present
+  as UTF-16 in `Engine.dll`), gating the vanilla damage flash produced by
+  `HUD.DisplayHit` → `PlayerController.ClientFlash`.
+- Decision: the client-side flash proxy issues the same `set ini:` command
+  when it attaches, so vanilla flashes do not stack with the mutator's
+  damage feedback. Like the GUI, the write is local and persistent.
 
 ## Rendering HUD from a mutator: options inspected
 
@@ -167,11 +189,16 @@ flash draws no text.)*
 
 ## Networking notes
 
-- The flash proxy replicates its configuration bundle under
-  `reliable if (bNetInitial && Role == ROLE_Authority)` and the per-kill
-  trigger under `reliable if (Role == ROLE_Authority) ClientShowFlash`
-  (standard UT2004 remote-call shape; the engine executes these locally on
-  listen/standalone hosts and forwards them to owners on network clients).
+- The flash proxy replicates both configuration bundles (frag and damage)
+  under `reliable if (bNetInitial && Role == ROLE_Authority)` and the
+  per-event triggers under `reliable if (Role == ROLE_Authority)
+  ClientShowFlash, ClientShowDamageFlash` (standard UT2004 remote-call
+  shape; the engine executes these locally on listen/standalone hosts and
+  forwards them to owners on network clients).
+- The server mutator also arms a repeating `SetTimer(10.0)` and calls the
+  reliable `ClientApplyConfig(...)` remote on every proxy every 10 seconds.
+  That makes the server the continuing authority for both settings bundles,
+  independent of whether an initial actor update was missed or dropped.
 - `Mutator.bAddToServerPackages=True` auto-adds the package to the server
   package map at load (`Engine.Mutator.PreBeginPlay` path), reducing
   package-mismatch errors; remote clients joining an internet/LAN server
@@ -195,10 +222,15 @@ flash draws no text.)*
 ## What could NOT be verified without a human at the screen
 
 - The in-game **[Configure Mutators] page look & feel** (the PlayInfo flow
-  is identical to the user's own working RespawnDelay, so risk is low).
-- The visual itself on screen (flash pop/decay); smoke tests
-  exercised the server path (spawn + registration + config propagation) and
-  `tools/test.sh` starts the game in DM with the mutator for eyeballing.
+  is identical to the user's own working RespawnDelay, so risk is low), now
+  with two separate groups (Frag Feedback / Damage Feedback).
+- The visuals themselves on screen (both flash envelopes) and the actual
+  live effect of the `ScreenFlashes False` write on a running client; the
+  command is the exact one the stock Game Settings checkbox uses, and smoke
+  tests exercise the server path (spawn + registration + config
+  propagation). `tools/test.sh` starts the game in DM with the mutator for
+  eyeballing; `mutate fragfeedbacktest` and
+  `mutate fragfeedbackdamagetest` preview each flash without combat.
 
 ## Localized language note
 

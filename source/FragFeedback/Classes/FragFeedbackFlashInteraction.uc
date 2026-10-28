@@ -10,8 +10,8 @@
 //
 // The Interaction is a plain Object (not an Actor) and is created locally by
 // FragFeedbackFlash on the client that owns the flash proxy. It only forwards
-// PreRender to that proxy's DrawFlash; configuration and the per-frag trigger
-// still replicate through the Actor.
+// PreRender to that proxy's DrawFlash/DrawDamageFlash; configuration and the
+// per-event triggers still replicate through the Actor.
 //=============================================================================
 class FragFeedbackFlashInteraction extends Interaction;
 
@@ -25,7 +25,10 @@ var FragFeedbackFlash Flash;
 function PreRender(Canvas C)
 {
 	if ( Flash != None )
+	{
 		Flash.DrawFlash(C);
+		Flash.DrawDamageFlash(C);
+	}
 }
 
 // ---------------------------------------------------------------------------

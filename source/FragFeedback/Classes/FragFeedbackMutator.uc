@@ -1,13 +1,16 @@
 //=============================================================================
 // FragFeedbackMutator.uc
 //
-// GTA V-style frag feedback for UT2004: when *you* frag an enemy, your screen
-// does the GTA postprocess feedback - a full-screen colored flash (blue by
-// default) that quickly appears and slowly vanishes. The Color (RGB 0-1) and
-// Duration (seconds) are exposed to the [Configure Mutators] GUI through the
-// PlayInfo system (the same mechanism RespawnDelay uses in this install), so
-// they are tunable from the game's own mutator screen without editing any
-// file.
+// GTA V-style feedback for UT2004: when *you* frag an enemy, your screen does
+// the GTA postprocess feedback - a full-screen colored flash (blue by
+// default) that quickly appears and slowly vanishes. When *you* take damage,
+// a separate (mostly transparent red by default) flash does the same.
+//
+// Both effects have their own Duration and Color settings, exposed to the
+// [Configure Mutators] GUI through the PlayInfo system (the same mechanism
+// RespawnDelay uses in this install), so they are tunable from the game's own
+// mutator screen without editing any file. A duration of 0 disables that
+// effect.
 //
 // Class layout (rationale in docs/APPROACH.md):
 //
@@ -19,16 +22,19 @@
 //       flash proxy at spawn time
 //
 //   FragFeedbackRules    (Engine.GameRules subclass, server side)
-//     - hooks GameInfo.ScoreKill(Killer, Killed) chained via Super so the
-//       vanilla rules and other mutators keep working
+//     - hooks GameInfo.ScoreKill(Killer, Killed) and GameInfo.NetDamage(...)
+//       chained via Super so the vanilla rules and other mutators keep working
 //
 //   FragFeedbackFlash    (Engine.Actor subclass, one per human player)
 //     - replicated proxy that lives where the player's screen lives; it
 //       registers a local Interaction that draws the full-screen colored
-//       flash (quick in, slow out) *behind* the HUD
+//       flashes (quick in, slow out) *behind* the HUD
+//     - on the client it also switches vanilla ScreenFlashes off, since this
+//       mutator replaces that effect
 //
-// Console helper (instant action / listen server):
-//   mutate fragfeedbacktest     show the flash without killing anyone
+// Console helpers (instant action / listen server):
+//   mutate fragfeedbacktest       show the frag flash without killing anyone
+//   mutate fragfeedbackdamagetest show the damage flash without being hit
 //
 // The canonical source of these files lives in the project repository and is
 // synced into /home/jdmr/Juegos/UT2004/FragFeedback/Classes by tools/build.sh
@@ -42,20 +48,31 @@ class FragFeedbackMutator extends Mutator
 // Configuration - exposed to the [Configure Mutators] GUI (PlayInfo)
 // ---------------------------------------------------------------------------
 
-/** Total seconds from flash onset to fully gone. */
+/** Frag flash: total seconds from onset to fully gone (0 = disabled). */
 var() config float DurationSec;
 
-/** Flash color channels: 0.0 (black) .. 1.0 (full). Default GTA-ish blue. */
+/** Frag flash color channels: 0.0 (black) .. 1.0 (full). Default GTA-ish blue. */
 var() config float ColorR;
 var() config float ColorG;
 var() config float ColorB;
+
+/** Damage flash: total seconds from onset to fully gone (0 = disabled). */
+var() config float DamageDurationSec;
+
+/** Damage flash color channels. Default: mostly transparent red. */
+var() config float DamageColorR;
+var() config float DamageColorG;
+var() config float DamageColorB;
 
 // ---------------------------------------------------------------------------
 // Configuration - file level (UT2004.ini, section [FragFeedback.FragFeedbackMutator])
 // ---------------------------------------------------------------------------
 
-/** Peak brightness of the flash (applied through the alpha channel). */
+/** Peak brightness of the frag flash (applied through the alpha channel). */
 var() config float FlashIntensity;
+
+/** Peak brightness of the damage flash (kept lower for a subtle red hit tint). */
+var() config float DamageFlashIntensity;
 
 // ---------------------------------------------------------------------------
 // Localization (FragFeedback.int; defaults duplicated below so the mutator
@@ -71,7 +88,17 @@ var() localized string ColorGDisplayText;
 var() localized string ColorGDescText;
 var() localized string ColorBDisplayText;
 var() localized string ColorBDescText;
+var() localized string DamageGroup;		// second page header in the mutator GUI
+var() localized string DamageDurationDisplayText;
+var() localized string DamageDurationDescText;
+var() localized string DamageColorRDisplayText;
+var() localized string DamageColorRDescText;
+var() localized string DamageColorGDisplayText;
+var() localized string DamageColorGDescText;
+var() localized string DamageColorBDisplayText;
+var() localized string DamageColorBDescText;
 var() localized string MsgTestShown;		// confirm the fake test flash
+var() localized string MsgDamageTestShown;	// confirm the fake damage test flash
 
 // ---------------------------------------------------------------------------
 // Internal state
@@ -79,6 +106,9 @@ var() localized string MsgTestShown;		// confirm the fake test flash
 
 /** One flash proxy per human player (parallel array, Owner = that player). */
 var array<FragFeedbackFlash> Flashes;
+
+/** How often the server re-sends the authoritative settings to every client. */
+const ConfigRefreshInterval = 10.0;
 
 // ---------------------------------------------------------------------------
 // Init
@@ -104,8 +134,31 @@ function PostBeginPlay()
 	else
 		log("FragFeedbackMutator: could not spawn FragFeedbackRules", 'FragFeedback');
 
-	log("FragFeedback enabled: duration="$DurationSec@"s, color ="
-		@ ColorR$","$ColorG$","$ColorB@"intensity ="@FlashIntensity, 'FragFeedback');
+	log("FragFeedback enabled: frag duration="$DurationSec@"s, color ="
+		@ ColorR$","$ColorG$","$ColorB@"intensity ="@FlashIntensity
+		@"; damage duration="$DamageDurationSec@"s, color ="
+		@ DamageColorR$","$DamageColorG$","$DamageColorB@"intensity ="@DamageFlashIntensity,
+		'FragFeedback');
+
+	// Keep the server authoritative: re-send the settings to every proxy on a
+	// fixed interval, even if a client missed/dropped the initial bundle.
+	SetTimer(ConfigRefreshInterval, true);
+}
+
+/**
+ * Periodic re-application of the mutator config on every connected player's
+ * flash proxy. The server owns the values; clients only render them.
+ */
+function Timer()
+{
+	local int i;
+
+	for ( i = 0; i < Flashes.Length; i++ )
+		if ( Flashes[i] != None )
+			Flashes[i].ClientApplyConfig(DurationSec, ColorR, ColorG, ColorB,
+				FlashIntensity, DamageDurationSec,
+				DamageColorR, DamageColorG, DamageColorB,
+				DamageFlashIntensity);
 }
 
 // ---------------------------------------------------------------------------
@@ -148,11 +201,16 @@ function FragFeedbackFlash SpawnFlash(PlayerController PC)
 		log("FragFeedbackMutator: flash spawn failed for "$PC, 'FragFeedback');
 		return None;
 	}
-	F.FlashDuration	= DurationSec;
+	F.FlashDuration		= DurationSec;
 	F.ColorR		= ColorR;
 	F.ColorG		= ColorG;
 	F.ColorB		= ColorB;
 	F.FlashIntensity	= FlashIntensity;
+	F.DamageDuration	= DamageDurationSec;
+	F.DamageColorR		= DamageColorR;
+	F.DamageColorG		= DamageColorG;
+	F.DamageColorB		= DamageColorB;
+	F.DamageFlashIntensity	= DamageFlashIntensity;
 
 	Flashes[Flashes.Length] = F;
 	return F;
@@ -187,6 +245,30 @@ function NotifyFrag(Controller Killer, Controller Killed)
 	F = SpawnFlash(PC);
 	if ( F != None )
 		F.ClientShowFlash();
+}
+
+// ---------------------------------------------------------------------------
+// Damage event (driven by FragFeedbackRules.NetDamage)
+// ---------------------------------------------------------------------------
+
+function NotifyDamage(Pawn Injured, int Damage, Pawn InstigatedBy)
+{
+	local PlayerController	PC;
+	local FragFeedbackFlash	F;
+
+	if ( Level.Game == None || Level.Game.bGameEnded )
+		return;
+	if ( Injured == None || Damage <= 0 )
+		return;
+
+	// only humans have screens; bots draw nothing
+	PC = PlayerController(Injured.Controller);
+	if ( PC == None )
+		return;
+
+	F = SpawnFlash(PC);
+	if ( F != None )
+		F.ClientShowDamageFlash();
 }
 
 /** A leaving player drops their proxy so it never leaks. */
@@ -225,6 +307,17 @@ function Mutate(string MutateString, PlayerController Sender)
 		return;
 	}
 
+	if ( Sender != None && MutateString ~= "fragfeedbackdamagetest" )
+	{
+		F = SpawnFlash(Sender);
+		if ( F != None )
+		{
+			F.ClientShowDamageFlash();
+			Sender.ClientMessage(MsgDamageTestShown);
+		}
+		return;
+	}
+
 	Super.Mutate(MutateString, Sender);
 }
 
@@ -239,7 +332,7 @@ static function FillPlayInfo(PlayInfo PlayInfo)
 	Super.FillPlayInfo(PlayInfo);	// always begin with the parent
 
 	PlayInfo.AddSetting(default.FlashGroup, "DurationSec",
-		default.DurationDisplayText, 0, 1, "Text", "8;0.1:15.0");
+		default.DurationDisplayText, 0, 1, "Text", "8;0.0:15.0");
 
 	PlayInfo.AddSetting(default.FlashGroup, "ColorR",
 		default.ColorRDisplayText, 0, 2, "Text", "8;0.0:1.0");
@@ -249,6 +342,18 @@ static function FillPlayInfo(PlayInfo PlayInfo)
 
 	PlayInfo.AddSetting(default.FlashGroup, "ColorB",
 		default.ColorBDisplayText, 0, 4, "Text", "8;0.0:1.0");
+
+	PlayInfo.AddSetting(default.DamageGroup, "DamageDurationSec",
+		default.DamageDurationDisplayText, 0, 1, "Text", "8;0.0:15.0");
+
+	PlayInfo.AddSetting(default.DamageGroup, "DamageColorR",
+		default.DamageColorRDisplayText, 0, 2, "Text", "8;0.0:1.0");
+
+	PlayInfo.AddSetting(default.DamageGroup, "DamageColorG",
+		default.DamageColorGDisplayText, 0, 3, "Text", "8;0.0:1.0");
+
+	PlayInfo.AddSetting(default.DamageGroup, "DamageColorB",
+		default.DamageColorBDisplayText, 0, 4, "Text", "8;0.0:1.0");
 }
 
 static function string GetDisplayText(string PropName)
@@ -266,6 +371,14 @@ static event string GetDescriptionText(string PropName)
 		return default.ColorGDescText;
 	if ( PropName ~= "ColorB" )
 		return default.ColorBDescText;
+	if ( PropName ~= "DamageDurationSec" )
+		return default.DamageDurationDescText;
+	if ( PropName ~= "DamageColorR" )
+		return default.DamageColorRDescText;
+	if ( PropName ~= "DamageColorG" )
+		return default.DamageColorGDescText;
+	if ( PropName ~= "DamageColorB" )
+		return default.DamageColorBDescText;
 
 	return "";
 }
@@ -276,26 +389,43 @@ static event string GetDescriptionText(string PropName)
 
 defaultproperties
 {
-	// GUI
+	// GUI - frag feedback
 	DurationSec=0.500000
 	ColorR=0.200000
 	ColorG=0.200000
 	ColorB=0.500000
 
+	// GUI - damage feedback
+	DamageDurationSec=0.500000
+	DamageColorR=0.750000
+	DamageColorG=0.000000
+	DamageColorB=0.000000
+
 	// file level
 	FlashIntensity=0.800000
+	DamageFlashIntensity=0.300000
 
 	// mutator GUI strings (localized again in FragFeedback.int)
 	FlashGroup="Frag Feedback"
 	DurationDisplayText="Duration (seconds)"
-	DurationDescText="Total seconds the colored screen flash takes from its quick onset to fully gone, after each of your frags."
+	DurationDescText="Total seconds the colored screen flash takes from its quick onset to fully gone, after each of your frags. Set to 0 to disable the frag flash."
 	ColorRDisplayText="Color R (0-1)"
-	ColorRDescText="Red channel of the flash. GTA-ish blue default is 0.15 / 0.45 / 1.00; a red flash would be 0.9 / 0.05 / 0.05."
+	ColorRDescText="Red channel of the frag flash. GTA-ish blue default is 0.20 / 0.20 / 0.50; a red flash would be 0.9 / 0.05 / 0.05."
 	ColorGDisplayText="Color G (0-1)"
-	ColorGDescText="Green channel of the flash."
+	ColorGDescText="Green channel of the frag flash."
 	ColorBDisplayText="Color B (0-1)"
-	ColorBDescText="Blue channel of the flash."
-	MsgTestShown="FragFeedback: fake flash displayed."
+	ColorBDescText="Blue channel of the frag flash."
+	DamageGroup="Damage Feedback"
+	DamageDurationDisplayText="Duration (seconds)"
+	DamageDurationDescText="Total seconds the colored screen flash takes from its quick onset to fully gone, after you take damage. Set to 0 to disable the damage flash."
+	DamageColorRDisplayText="Color R (0-1)"
+	DamageColorRDescText="Red channel of the damage flash. Default is a mostly transparent red; increase the intensity in the ini if it is too subtle."
+	DamageColorGDisplayText="Color G (0-1)"
+	DamageColorGDescText="Green channel of the damage flash."
+	DamageColorBDisplayText="Color B (0-1)"
+	DamageColorBDescText="Blue channel of the damage flash."
+	MsgTestShown="FragFeedback: fake frag flash displayed."
+	MsgDamageTestShown="FragFeedback: fake damage flash displayed."
 
 	// engine wiring
 	bAddToServerPackages=True
